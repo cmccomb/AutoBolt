@@ -36,64 +36,67 @@ def _calculate_fos_from_build123d(
 
     msh_file = tempdir.name + "/mesh_merged.msh"
     xdmf_file_mesh = tempdir.name + "/mesh.xdmf"
-    xdmf_file_surface_tags = tempdir.name + "surface_tags.xdmf"
+    xdmf_file_surface_tags = tempdir.name + "/surface_tags.xdmf"
 
     # Initialize GMSH
     gmsh.initialize()
+    try:
+        # Start a fresh model to avoid leftover state between calls
+        gmsh.model.add("build123d_model")
 
-    # Import the STEP file
-    gmsh.merge(step_file)
+        # Import the STEP file
+        gmsh.merge(step_file)
 
-    # Synchronize CAD kernel
-    gmsh.model.occ.synchronize()
+        # Synchronize CAD kernel
+        gmsh.model.occ.synchronize()
 
-    # Get all volumes and surfaces
-    volumes = gmsh.model.getEntities(dim=3)
-    surfaces = gmsh.model.getEntities(dim=2)
+        # Get all volumes and surfaces
+        volumes = gmsh.model.getEntities(dim=3)
+        surfaces = gmsh.model.getEntities(dim=2)
 
-    # Assign physical groups to volumes
-    for i, volume in enumerate(volumes):
-        gmsh.model.addPhysicalGroup(volume[0], [volume[1]], tag=i + 1)
+        # Assign physical groups to volumes
+        for i, volume in enumerate(volumes):
+            gmsh.model.addPhysicalGroup(volume[0], [volume[1]], tag=i + 1)
 
-    # Assign physical groups to surfaces
-    for i, surface in enumerate(surfaces):
-        gmsh.model.addPhysicalGroup(surface[0], [surface[1]], tag=i + 1)
+        # Assign physical groups to surfaces
+        for i, surface in enumerate(surfaces):
+            gmsh.model.addPhysicalGroup(surface[0], [surface[1]], tag=i + 1)
 
-    surface_info = []
-    for dim, s in gmsh.model.getEntities(2):
-        bb = gmsh.model.occ.getBoundingBox(dim, s)
-        ymin, ymax = bb[1], bb[4]
-        surface_info.append((s, ymin, ymax))
+        surface_info = []
+        for dim, s in gmsh.model.getEntities(2):
+            bb = gmsh.model.occ.getBoundingBox(dim, s)
+            ymin, ymax = bb[1], bb[4]
+            surface_info.append((s, ymin, ymax))
 
-    global_ymin = min(s[1] for s in surface_info)
-    global_ymax = max(s[2] for s in surface_info)
+        global_ymin = min(s[1] for s in surface_info)
+        global_ymax = max(s[2] for s in surface_info)
 
-    # Helper function: find the surface tag at a target Y location
-    def y_face(surface_info, target_y, tol=1e-6):
-        return next(
-            tag
-            for tag, ymin, ymax in surface_info
-            if abs(ymax - ymin) < tol and abs(ymin - target_y) < tol
-        )
+        # Helper function: find the surface tag at a target Y location
+        def y_face(surface_info, target_y, tol=1e-6):
+            return next(
+                tag
+                for tag, ymin, ymax in surface_info
+                if abs(ymax - ymin) < tol and abs(ymin - target_y) < tol
+            )
 
-    # Identify min Y and max Y surfaces
-    trac_pos_tag = y_face(surface_info, global_ymin)
-    trac_neg_tag = y_face(surface_info, global_ymax)
-    zero_disp_tags = [trac_pos_tag]
-    traction_tags = [trac_neg_tag]
+        # Identify min Y and max Y surfaces
+        trac_pos_tag = y_face(surface_info, global_ymin)
+        trac_neg_tag = y_face(surface_info, global_ymax)
+        zero_disp_tags = [trac_pos_tag]
+        traction_tags = [trac_neg_tag]
 
-    gmsh.model.occ.synchronize()
+        gmsh.model.occ.synchronize()
 
-    # Generate the mesh
-    gmsh.model.mesh.generate(3)
+        # Generate the mesh
+        gmsh.model.mesh.generate(3)
 
-    gmsh.model.mesh.removeDuplicateNodes()
+        gmsh.model.mesh.removeDuplicateNodes()
 
-    # Save the mesh to a .msh file
-    gmsh.write(msh_file)
-
-    # Finalize GMSH
-    gmsh.finalize()
+        # Save the mesh to a .msh file
+        gmsh.write(msh_file)
+    finally:
+        # Finalize GMSH even on error to avoid leaking state across tool calls
+        gmsh.finalize()
 
     # Read the .msh file using meshio
     msh = meshio.read(msh_file)
